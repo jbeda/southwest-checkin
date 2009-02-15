@@ -88,10 +88,74 @@ tz_mountain = timezone('US/Mountain')
 tz_pacific = timezone('US/Pacific')
 
 airport_timezone_map = {
-  'SEA': tz_pacific,
-  'MDW': tz_central,
+  'ABQ': tz_mountain,
+  'ALB': tz_eastern,
+  'AMA': tz_central,
+  'AUS': tz_central,
+  'BDL': tz_eastern,
+  'BHM': tz_central,
+  'BNA': tz_central,
+  'BOI': tz_mountain,
   'BUF': tz_eastern,
+  'BUR': tz_pacific,
+  'BWI': tz_eastern,
+  'CLE': tz_eastern,
+  'CMH': tz_eastern,
+  'CRP': tz_central,
+  'DAL': tz_central,
+  'DEN': tz_mountain,
+  'DTW': tz_eastern,
+  'ELP': tz_mountain,
+  'FLL': tz_eastern,
+  'GEG': tz_pacific,
+  'HOU': tz_central,
+  'HRL': tz_central,
+  'IAD': tz_eastern,
+  'IND': tz_eastern,
+  'ISP': tz_eastern,
+  'JAN': tz_eastern,
+  'JAX': tz_eastern,
+  'LAS': tz_pacific,
+  'LAX': tz_pacific,
+  'LBB': tz_central,
+  'LIT': tz_central,
+  'MAF': tz_central,
+  'MCI': tz_central,
+  'MCO': tz_eastern,
+  'MDW': tz_central,
+  'MHT': tz_eastern,
+  'MSP': tz_central,
+  'MSY': tz_central,
+  'OAK': tz_pacific,
+  'OKC': tz_central,
+  'OMA': tz_central,
+  'ONT': tz_pacific,
+  'ORF': tz_eastern,
+  'PBI': tz_eastern,
+  'PDX': tz_pacific,
+  'PHL': tz_eastern,
+  'PHX': tz_arizona,
+  'PIT': tz_eastern,
+  'PVD': tz_eastern,
+  'RDU': tz_eastern,
+  'RNO': tz_pacific,
+  'RSW': tz_eastern,
+  'SAN': tz_pacific,
+  'SAT': tz_central,
+  'SDF': tz_eastern,
+  'SEA': tz_pacific,
+  'SFO': tz_pacific,
+  'SJC': tz_pacific,
+  'SLC': tz_mountain,
+  'SMF': tz_pacific,
+  'SMF': tz_pacific,
+  'SNA': tz_pacific,
+  'STL': tz_central,
+  'TPA': tz_eastern,
+  'TUL': tz_central,
+  'TUS': tz_arizona,
 }
+
 # ========================================================================
 
 verbose = False
@@ -528,11 +592,14 @@ def main():
     # says we are good to go
     for flight in res.flights:
       flight_time = time_module.mktime(flight.depart_dt_utc.utctimetuple()) - time_module.timezone
-      sched_time = flight_time - 3*60 - 24*60*60
-      print "Update Sched: %s" % DateTimeToString(datetime.fromtimestamp(sched_time, utc))
-      sch.enterabs(sched_time, 1, TryCheckinFlight, (res, flight, sch, 1))
+      if flight_time < time_module.time():
+        print "Flight already left!"
+      else:
+        sched_time = flight_time - 3*60 - 24*60*60
+        print "Update Sched: %s" % DateTimeToString(datetime.fromtimestamp(sched_time, utc))
+        sch.enterabs(sched_time, 1, TryCheckinFlight, (res, flight, sch, 1))
     
-  print "Current time: ", DateTimeToString(datetime.now(utc))
+  print "Current time: %s" % DateTimeToString(datetime.now(utc))
   print "Flights scheduled.  Waiting..."
   sch.run()
 
