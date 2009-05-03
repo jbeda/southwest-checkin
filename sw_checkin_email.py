@@ -43,6 +43,12 @@ from HTMLParser import HTMLParser
 from datetime import datetime,date,timedelta,time
 from pytz import timezone,utc
 
+# If we are unable to check in, how soon should we retry?
+RETRY_INTERVAL = 5
+
+# How soon before the designated time should we try to check in?
+CHECKIN_WINDOW = 3*60
+
 # Email confuration
 should_send_email = True
 email_from = None
@@ -519,11 +525,11 @@ def TryCheckinFlight(res, flight, sch, attempt):
     print message
     send_email("Flight checked in!", message)
   else:
-    if attempt > 30:
+    if attempt > (CHECKIN_WINDOW * 2) / RETRY_INTERVAL:
       print "FAILURE.  Too many failures, giving up."
     else:
-      print "FAILURE.  Scheduling another try in 30 seconds"
-      sch.enterabs(time_module.time() + 30, 1,
+      print "FAILURE.  Scheduling another try in %d seconds" % RETRY_INTERVAL
+      sch.enterabs(time_module.time() + RETRY_INTERVAL, 1,
                    TryCheckinFlight, (res, flight, sch, attempt + 1))
       
 def send_email(subject, message):
@@ -595,7 +601,7 @@ def main():
       if flight_time < time_module.time():
         print "Flight already left!"
       else:
-        sched_time = flight_time - 3*60 - 24*60*60
+        sched_time = flight_time - CHECKIN_WINDOW - 24*60*60
         print "Update Sched: %s" % DateTimeToString(datetime.fromtimestamp(sched_time, utc))
         sch.enterabs(sched_time, 1, TryCheckinFlight, (res, flight, sch, 1))
     
