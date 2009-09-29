@@ -25,8 +25,6 @@
 # Based on script by Ken Washington
 #   http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/496790
 
-# TODO: Rewrite scraping/REs using something more sane, like BeautifulSoup
-
 import re
 import sys
 import time as time_module
@@ -35,10 +33,11 @@ import sched
 import string
 import urllib
 import urllib2
+import urlparse
 import httplib
 import smtplib
 import getpass
-from HTMLParser import HTMLParser
+from BeautifulSoup import BeautifulSoup
 
 from datetime import datetime,date,timedelta,time
 from pytz import timezone,utc
@@ -73,7 +72,7 @@ DEBUG_SCH = 0
 # ========================================================================
 # fixed page locations and parameters
 # DO NOT change these parameters
-main_url = 'www.southwest.com'
+main_url = 'http://www.southwest.com'
 checkin_url = '/travel_center/retrieveCheckinDoc.html'
 retrieve_url = '/travel_center/retrieveItinerary.html'
 defaultboxes = ["recordLocator", "firstName", "lastName"]
@@ -172,8 +171,10 @@ def dlog(str):
 # ========================================================================
 
 class Flight(object):
-  def __init__(self, reservation):
-    self.reservation = reservation
+  pass
+
+class FlightStop(object):
+  pass
 
 class Reservation(object):
   def __init__(self, first_name, last_name, code):
@@ -182,80 +183,6 @@ class Reservation(object):
     self.code = code
 
 # =========== function definitions =======================================
-
-# this is a parser for the Southwest pages
-class HTMLSouthwestParser(HTMLParser):
-
-  def __init__(self, swdata):
-    self._reset()
-    HTMLParser.__init__(self)
-
-    # if a web page string is passed, feed it
-    if swdata != None and len(swdata)>0:
-      self.feed(swdata)
-      self.close()
-
-  def _reset(self):
-    self.hiddentags = {}
-    self.searchaction = ""
-    self.formaction = ""
-    self.is_search = False
-    self.textnames = []
-
-  # override the feed function to reset our parameters
-  # and then call the original feed function
-  def feed(self, formdata):
-    self._reset()
-    HTMLParser.feed(self, formdata)
-
-  # handle tags in web pages
-  # this is where the real magic is done
-  def handle_starttag(self, tag, attrs):
-    if tag=="input":
-      ishidden = False
-      ischeckbox = False
-      istext = False
-      issubmit = False
-      thevalue = ""
-      thename = None
-      for attr in attrs:
-        if attr[0]=="type":
-          if attr[1]=="hidden":
-            ishidden= True
-          elif attr[1]=="checkbox" or attr[1]=="radio":
-            ischeckbox = True
-          elif attr[1]=="text":
-            istext = True
-          elif attr[1]=="submit":
-            issubmit = True
-        elif attr[0]=="name":
-          thename= attr[1]
-          istext = True
-        elif attr[0]=="value":
-          thevalue= attr[1]
-
-      # store the tag for search forms separately
-      # from the tags for non-search forms
-      if (ishidden or ischeckbox) and not self.is_search:
-        self.hiddentags.setdefault(thename, []).append(thevalue)
-
-      # otherwise, append the name of the text fields
-      elif istext and not self.is_search and not issubmit:
-        self.textnames.append(thename)
-
-    elif tag=="form":
-      for attr in attrs:
-        if attr[0]=="action":
-          theaction = attr[1]
-
-          # check to see if this is a search form
-          if theaction.find("search") > 0:
-            self.searchaction = theaction
-            self.is_search = True
-          else:
-            self.formaction = theaction
-            self.is_search = False
-
 
 def WriteFile(filename, data):
   fd = open(filename, "w")
@@ -269,7 +196,7 @@ def ReadFile(filename):
 
 # this function reads a URL and returns the text of the page
 def ReadUrl(host, path):
-  url = "http://%s%s" % (host, path)
+  url = urlparse.urljoin(host, path)
   dlog("GET to %s" % url)
   wdata = ""
 
@@ -287,7 +214,7 @@ def ReadUrl(host, path):
 # this function sends a post just like you clicked on a submit button
 def PostUrl(host, path, dparams):
   wdata = ""
-  url = "http://%s%s" % (host, path)
+  url = urlparse.urljoin(host, path)
   params = urllib.urlencode(dparams, True)
   headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/plain"}
 
@@ -321,6 +248,73 @@ def setInputBoxes(textnames, conf_number, first_name, last_name):
 
   return params
 
+class HtmlFormParser(object):
+  def __init__(self, data, id):
+    self.hiddentags = {}
+    self.formaction = ""
+    self.textnames = []
+
+    soup = BeautifulSoup(data)
+    form = soup.find("form", id=id)
+    if not form:
+      return
+
+    self.formaction = form.get("action", None)
+
+    # find all inputs
+    for i in form.findAll("input"):
+      self.addInput(i)
+
+  def addInput(self, input):
+    type = input.get("type", None)
+    name = input.get("name", None)
+    if type == "hidden" or type == "checkbox" or type == "radio" :
+      self.hiddentags.setdefault(name, []).append(input.get("value", None))
+    elif type == "text":
+      self.textnames.append(name);
+
+class FlightInfoParser(object):
+  def __init__(self, data):
+    soup = BeautifulSoup(data)
+    self.flights = []
+
+    for td in soup.findAll("td", "flightInfoDetails"):
+      self.flights.append(self._parseFlightInfo(td))
+
+  def _parseFlightInfo(self, soup):
+    flight = Flight()
+
+    flight_date_str = soup.find("span", "travelDateTime").string
+    day = date(*time_module.strptime(flight_date_str, "%A, %B %d, %Y")[0:3])
+
+    td = soup.findNextSibling("td", "flightRouting")
+    tr = td.find("tr")
+    flight.depart = self._parseFlightStop(day, tr)
+    tr = tr.findNextSibling("tr")
+    flight.arrive = self._parseFlightStop(day, tr)
+
+    if flight.arrive.dt_utc < flight.depart.dt_utc:
+      flight.arrive.dt = flight.arrive.tz.normalize(
+        flight.arrive.dt.replace(day = flight.arrive.dt.day+1))
+      flight.arrive.dt_utc = flight.arrive.dt.astimezone(utc)
+    return flight
+
+  def _parseFlightStop(self, day, soup):
+    flight_stop = FlightStop()
+    s = soup.find("td", attrs = {'class': re.compile("routingDetailsStops ?")}) \
+        .find("strong").string
+    flight_stop.airport = re.findall("\((\w\w\w)\)$", s)[0]
+    flight_stop.tz = airport_timezone_map[flight_stop.airport]
+    
+    s = soup.find("td", attrs = {'class': re.compile("routingDetailsTimes ?")}) \
+        .find("strong").string
+    flight_time = time(*time_module.strptime(s, "%I:%M %p")[3:5])
+    flight_stop.dt = flight_stop.tz.localize(
+      datetime.combine(day, flight_time), is_dst=None)
+    flight_stop.dt_utc = flight_stop.dt.astimezone(utc)
+    return flight_stop
+    
+
 # this routine extracts the departure date and time
 def getFlightTimes(the_url, res):
   if DEBUG_SCH > 1:
@@ -332,16 +326,16 @@ def getFlightTimes(the_url, res):
     print "Error: no data returned from ", main_url+the_url
     sys.exit(1)
 
-  gh = HTMLSouthwestParser(swdata)
+  form_data = HtmlFormParser(swdata, "itineraryLookup")
 
   # get the post action name from the parser
-  post_url = gh.formaction
+  post_url = form_data.formaction
   if post_url == None or post_url == "":
     print "Error: no POST action found in ", main_url + the_url
     sys.exit(1)
 
   # load the parameters into the text boxes
-  params = setInputBoxes(gh.textnames, res.code, res.first_name, res.last_name)
+  params = setInputBoxes(form_data.textnames, res.code, res.first_name, res.last_name)
 
   # submit the request to pull up the reservations on this confirmation number
   if DEBUG_SCH > 1:
@@ -354,64 +348,8 @@ def getFlightTimes(the_url, res):
     print "Params = ", dparams
     sys.exit(1)
 
-  current_pos = 0
-  res.flights = []
-
-  # Find all of the flights listed on the page
-  while True:
-    # parse the returned file to grab the dates and times
-    # the last word in the table above the first date is "Routing Details"
-    # this is currently a unique word in the html returned by the above
-    dateloc_0 = reservations.find("Details", current_pos)
-    dateloc_1 = reservations.find("bookingFormText", dateloc_0)
-    i1 = reservations.find(">", dateloc_1)
-    i2 = reservations.find("<", i1)
-    flight_date_str = reservations[i1 + 1:i2]
-
-    # narrow down the search to the line with the word depart
-    timeloc = reservations.find("Depart", dateloc_1)
-    timeline = reservations[timeloc:timeloc+120]
-
-    # use a regular expression to find the two times
-    ts = re.findall("(\w\w\w)\) at (\d{1,2}\:\d{1,2}[apAP][mM])", timeline)
-    if len(ts) < 2:
-      break
-
-    flight = Flight(res)
-    flight.depart_airport = ts[0][0]
-    flight.depart_tz = airport_timezone_map[flight.depart_airport]
-    flight.arrive_airport = ts[1][0]
-    flight.arrive_tz = airport_timezone_map[flight.arrive_airport]
-
-    flight_depart_time = time(*time_module.strptime(ts[0][1], "%I:%M%p")[3:5])
-    flight_arrive_time = time(*time_module.strptime(ts[1][1], "%I:%M%p")[3:5])
-
-    flight_date = date(date.today().year,
-                       *time_module.strptime(flight_date_str, "%b %d")[1:3])
-    if flight_date - date.today() < timedelta(days=-300):
-      flight_date = flight_date.replace(year=flight_date.year+1)
-
-    depart_dt = flight.depart_tz.localize(
-      datetime.combine(flight_date, flight_depart_time),
-      is_dst=None)
-    depart_dt_utc = depart_dt.astimezone(utc)
-    arrive_dt = flight.arrive_tz.localize(
-      datetime.combine(flight_date, flight_arrive_time),
-      is_dst=None)
-    arrive_dt_utc = arrive_dt.astimezone(utc)
-
-    if arrive_dt_utc < depart_dt_utc:
-      arrive_dt = flight.arrive_tz.normalize(
-        arrive_dt.replace(day = arrive_dt.day+1))
-      arrive_dt_utc = arrive_dt.astimezone(utc)
-
-    flight.depart_dt = depart_dt
-    flight.depart_dt_utc = depart_dt_utc
-    flight.arrive_dt = arrive_dt
-    flight.arrive_dt_utc = arrive_dt_utc
-    res.flights.append(flight)
-
-    current_pos = timeloc
+  flights = FlightInfoParser(reservations)
+  res.flights = flights.flights
 
   return res.flights
 
@@ -427,17 +365,19 @@ def getBoardingPass(the_url, res):
     sys.exit(1)
 
   # parse the data
-  gh = HTMLSouthwestParser(swdata)
+  form_data = HtmlFormParser(swdata, None)
 
   # get the post action name from the parser
-  post_url = gh.formaction
+  post_url = form_data.formaction
   if post_url==None or post_url=="":
     print "Error: no POST action found in ", main_url+the_url
     sys.exit(1)
 
   # load the parameters into the text boxes by name
   # where the names are obtained from the parser
-  params = setInputBoxes(gh.textnames, res.code, res.first_name, res.last_name)
+  params = setInputBoxes(form_data.textnames, 
+                         res.code, res.first_name, 
+                         res.last_name)
 
   # submit the request to pull up the reservations
   if DEBUG_SCH > 1:
@@ -451,16 +391,16 @@ def getBoardingPass(the_url, res):
     sys.exit(1)
 
   # parse the returned reservations page
-  rh = HTMLSouthwestParser(reservations)
+  form_data = HtmlFormParser(reservations, None)
 
   # Extract the name of the post function to check into the flight
-  final_url = rh.formaction
+  final_url = form_data.formaction
 
   # the returned web page contains three unique security-related hidden fields
   # plus a dynamically generated value for the checkbox or radio button
   # these must be sent to the next submit post to work properly
   # they are obtained from the parser object
-  params = rh.hiddentags
+  params = form_data.hiddentags
   if len(params) < 4:
     dlog("Error: Fewer than the expect 4 special fields returned from %s" % main_url+post_url)
     return None
@@ -500,10 +440,10 @@ def getFlightInfo(res, flights):
 
   for (i, flight) in enumerate(flights):
     message += "Flight %d:\n  Departs: %s %s (%s)\n  Arrives: %s %s (%s)\n" \
-          % (i+1, flight.depart_airport, DateTimeToString(flight.depart_dt),
-             DateTimeToString(flight.depart_dt_utc),
-             flight.arrive_airport, DateTimeToString(flight.arrive_dt),
-             DateTimeToString(flight.arrive_dt_utc))
+          % (i+1, flight.depart.airport, DateTimeToString(flight.depart.dt),
+             DateTimeToString(flight.depart.dt_utc),
+             flight.arrive.airport, DateTimeToString(flight.arrive.dt),
+             DateTimeToString(flight.arrive.dt_utc))
   return message
 
 def displayFlightInfo(res, flights, do_send_email=False):
@@ -536,27 +476,28 @@ def send_email(subject, message):
   if not should_send_email:
     return
   
-  try:
-    smtp = smtplib.SMTP(smtp_server, 587)
-    smtp.ehlo()
-    if smtp_use_tls:
-      smtp.starttls()
+  for to in [string.strip(s) for s in string.split(email_to, ",")]:
+    try:
+      smtp = smtplib.SMTP(smtp_server, 587)
       smtp.ehlo()
-    if smtp_auth:
-      smtp.login(smtp_user, smtp_password)
-    print "sending mail"
-    for to in [string.strip(s) for s in string.split(email_to, ",")]:
-      smtp.sendmail(email_from, email_to, """From: %s
+      if smtp_use_tls:
+        smtp.starttls()
+      smtp.ehlo()
+      if smtp_auth:
+        smtp.login(smtp_user, smtp_password)
+      print "Sending mail to %s." % to
+      smtp.sendmail(email_from, to, """From: %s
 To: %s
 Subject: %s
 
 %s
-""" % (email_from, email_to, subject, message));
-    print "EMail sent successfully."
-    smtp.close()
-  except:
-    print "Error sending email!"
-    print sys.exc_info()[1]
+""" % (email_from, to, subject, message))
+      
+      print "EMail sent successfully."
+      smtp.close()
+    except:
+      print "Error sending email!"
+      print sys.exc_info()[1]
 
 # main program
 def main():
@@ -573,17 +514,20 @@ def main():
     reservations.append(Reservation(firstname, lastname, code))
     del args[0:3]
 
-  global smtp_user, smtp_password, email_from, email_to
+  global smtp_user, smtp_password, email_from, email_to, should_send_email
   
   if should_send_email:
     if not email_from:
       email_from = raw_input("Email from: ");
-    if not email_to:
-      email_to = raw_input("Email to: ");
-    if not smtp_user:
-      smtp_user = email_from
-    if not smtp_password and smtp_auth:
-      smtp_password = getpass.getpass("Email Password: ");
+    if email_from:
+      if not email_to:
+        email_to = raw_input("Email to: ");
+      if not smtp_user:
+        smtp_user = email_from
+      if not smtp_password and smtp_auth:
+        smtp_password = getpass.getpass("Email Password: ");
+    else:
+      should_send_email = False
 
   sch = sched.scheduler(time_module.time, time_module.sleep)
 
@@ -597,7 +541,7 @@ def main():
     # Schedule all of the flights for checkin.  Schedule 3 minutes before our clock
     # says we are good to go
     for flight in res.flights:
-      flight_time = time_module.mktime(flight.depart_dt_utc.utctimetuple()) - time_module.timezone
+      flight_time = time_module.mktime(flight.depart.dt_utc.utctimetuple()) - time_module.timezone
       if flight_time < time_module.time():
         print "Flight already left!"
       else:
