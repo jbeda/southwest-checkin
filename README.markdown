@@ -26,5 +26,5 @@ install is to use easy_install.
     $ sw_checkin_email.py John Doe ABC123
 
 You will have to leave your terminal open while the script is waiting. You may
-want to look into using [[nohup ordisown](http://www.basicallytech.com/blog/index.php?/archives/70-Shell-stuff-job-control-and-screen.html#bash_disown)
+want to look into using [nohup ordisown](http://www.basicallytech.com/blog/index.php?/archives/70-Shell-stuff-job-control-and-screen.html#bash_disown)
 so that you can log out while the script runs.
