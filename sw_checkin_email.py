@@ -365,7 +365,7 @@ def getBoardingPass(the_url, res):
     sys.exit(1)
 
   # parse the data
-  form_data = HtmlFormParser(swdata, None)
+  form_data = HtmlFormParser(swdata, "itineraryLookup")
 
   # get the post action name from the parser
   post_url = form_data.formaction
@@ -391,19 +391,18 @@ def getBoardingPass(the_url, res):
     sys.exit(1)
 
   # parse the returned reservations page
-  form_data = HtmlFormParser(reservations, None)
+  form_data = HtmlFormParser(reservations, "checkinOptions")
 
   # Extract the name of the post function to check into the flight
   final_url = form_data.formaction
 
-  # the returned web page contains three unique security-related hidden fields
-  # plus a dynamically generated value for the checkbox or radio button
-  # these must be sent to the next submit post to work properly
-  # they are obtained from the parser object
   params = form_data.hiddentags
-  if len(params) < 4:
-    dlog("Error: Fewer than the expect 4 special fields returned from %s" % main_url+post_url)
+  if len(params) < 2:
+    dlog("Error: Fewer than the expect 2 special fields returned from %s" % main_url+post_url)
     return None
+    
+  # This is the button to press
+  params.setdefault("printDocuments", []).append("Print Selected Document(s)")
 
   # finally, lets check in the flight and make our success file
   if DEBUG_SCH > 1:
@@ -422,10 +421,13 @@ def getBoardingPass(the_url, res):
 
   # look for what boarding letter and number we got in the file
   group = re.search(r"boarding([ABC])\.gif", checkinresult)
-  num = re.search(r"bpPassNum\"[^>]*>(\d+)", checkinresult)
+  num = 0
+  for m in re.finditer(r"boarding(\d)\.gif", checkinresult):
+    num *= 10
+    num += int(m.group(1))
 
   if group and num:
-    return "%s%s" % (group.group(1), num.group(1))
+    return "%s%d" % (group.group(1), num)
   else:
     return None
 
