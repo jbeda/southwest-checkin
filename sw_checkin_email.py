@@ -38,6 +38,14 @@ import httplib
 import smtplib
 import getpass
 from BeautifulSoup import BeautifulSoup
+from BeautifulSoup import Tag
+
+try:
+  from email.mime.multipart import MIMEMultipart
+  from email.mime.text import MIMEText
+except:
+  from email.MIMEMultipart import MIMEMultipart
+  from email.MIMEText import MIMEText
 
 from datetime import datetime,date,timedelta,time
 from pytz import timezone,utc
@@ -66,8 +74,6 @@ else:  # gmail config
   smtp_user = email_from
   smtp_password = ""  # if blank, we will prompt first and send test message
   smtp_use_tls = True
-
-DEBUG_SCH = 0
 
 # ========================================================================
 # fixed page locations and parameters
@@ -171,6 +177,10 @@ def dlog(str):
 # ========================================================================
 
 class Flight(object):
+  def __init__(self):
+    self.legs = []
+
+class FlightLeg(object):
   pass
 
 class FlightStop(object):
@@ -183,16 +193,6 @@ class Reservation(object):
     self.code = code
 
 # =========== function definitions =======================================
-
-def WriteFile(filename, data):
-  fd = open(filename, "w")
-  fd.write(data)
-  fd.close()
-
-def ReadFile(filename):
-  fd = open(filename, "r")
-  data = fd.read()
-  fd.close()
 
 # this function reads a URL and returns the text of the page
 def ReadUrl(host, path):
@@ -231,9 +231,10 @@ def PostUrl(host, path, dparams):
     print sys.exc_info()[1]
     sys.exit(1)
 
+  url_fetched = resp.geturl()
   wdata = resp.read()
 
-  return wdata
+  return (wdata, url_fetched)
 
 def setInputBoxes(textnames, conf_number, first_name, last_name):
   if len(textnames) == 3:
@@ -288,26 +289,33 @@ class FlightInfoParser(object):
     day = date(*time_module.strptime(flight_date_str, "%A, %B %d, %Y")[0:3])
 
     td = soup.findNextSibling("td", "flightRouting")
+    
     tr = td.find("tr")
-    flight.depart = self._parseFlightStop(day, tr)
-    tr = tr.findNextSibling("tr")
-    flight.arrive = self._parseFlightStop(day, tr)
+    while tr:
+      flight_leg = FlightLeg()
+      flight.legs.append(flight_leg)
+      flight_leg.depart = self._parseFlightStop(day, tr)
+      tr = tr.findNextSibling("tr")
+      flight_leg.arrive = self._parseFlightStop(day, tr)
 
-    if flight.arrive.dt_utc < flight.depart.dt_utc:
-      flight.arrive.dt = flight.arrive.tz.normalize(
-        flight.arrive.dt.replace(day = flight.arrive.dt.day+1))
-      flight.arrive.dt_utc = flight.arrive.dt.astimezone(utc)
+      if flight_leg.arrive.dt_utc < flight_leg.depart.dt_utc:
+        flight_leg.arrive.dt = flight_leg.arrive.tz.normalize(
+          flight_leg.arrive.dt.replace(day = flight_leg.arrive.dt.day+1))
+        flight_leg.arrive.dt_utc = flight_leg.arrive.dt.astimezone(utc)
+
+      tr = tr.findNextSibling("tr")
+ 
     return flight
 
   def _parseFlightStop(self, day, soup):
     flight_stop = FlightStop()
-    s = soup.find("td", attrs = {'class': re.compile("routingDetailsStops ?")}) \
-        .find("strong").string
-    flight_stop.airport = re.findall("\((\w\w\w)\)$", s)[0]
+    stop_td = soup.find("td", attrs = {'class': re.compile("routingDetailsStops ?")})
+    s = ''.join(stop_td.findAll(text=True))
+    flight_stop.airport = re.findall("\(([A-Z]{3})\)", s)[0]
     flight_stop.tz = airport_timezone_map[flight_stop.airport]
     
-    s = soup.find("td", attrs = {'class': re.compile("routingDetailsTimes ?")}) \
-        .find("strong").string
+    detail_td = soup.find("td", attrs = {'class': re.compile("routingDetailsTimes ?")})
+    s = ''.join(detail_td.findAll(text=True)).strip()
     flight_time = time(*time_module.strptime(s, "%I:%M %p")[3:5])
     flight_stop.dt = flight_stop.tz.localize(
       datetime.combine(day, flight_time), is_dst=None)
@@ -317,10 +325,7 @@ class FlightInfoParser(object):
 
 # this routine extracts the departure date and time
 def getFlightTimes(the_url, res):
-  if DEBUG_SCH > 1:
-    swdata = ReadFile("Southwest Airlines - Retrieve Itinerary.htm")
-  else:
-    swdata = ReadUrl(main_url, the_url)
+  swdata = ReadUrl(main_url, the_url)
 
   if swdata == None or len(swdata) == 0:
     print "Error: no data returned from ", main_url+the_url
@@ -338,10 +343,7 @@ def getFlightTimes(the_url, res):
   params = setInputBoxes(form_data.textnames, res.code, res.first_name, res.last_name)
 
   # submit the request to pull up the reservations on this confirmation number
-  if DEBUG_SCH > 1:
-    reservations = ReadFile("Southwest Airlines - Schedule.htm")
-  else:
-    reservations = PostUrl(main_url, post_url, params)
+  (reservations, _) = PostUrl(main_url, post_url, params)
 
   if reservations == None or len(reservations) == 0:
     print "Error: no data returned from ", main_url + post_url
@@ -355,10 +357,7 @@ def getFlightTimes(the_url, res):
 
 def getBoardingPass(the_url, res):
   # read the southwest checkin web site
-  if DEBUG_SCH > 1:
-    swdata = ReadFile("Southwest Airlines - Check In and Print Boarding Pass.htm")
-  else:
-    swdata = ReadUrl(main_url, the_url)
+  swdata = ReadUrl(main_url, the_url)
 
   if swdata==None or len(swdata)==0:
     print "Error: no data returned from ", main_url+the_url
@@ -380,10 +379,7 @@ def getBoardingPass(the_url, res):
                          res.last_name)
 
   # submit the request to pull up the reservations
-  if DEBUG_SCH > 1:
-    reservations = ReadFile("Southwest Airlines - Print Boarding Pass.htm")
-  else:
-    reservations = PostUrl(main_url, post_url, params)
+  (reservations, _) = PostUrl(main_url, post_url, params)
 
   if reservations==None or len(reservations)==0:
     print "Error: no data returned from ", main_url+post_url
@@ -399,37 +395,37 @@ def getBoardingPass(the_url, res):
   params = form_data.hiddentags
   if len(params) < 2:
     dlog("Error: Fewer than the expect 2 special fields returned from %s" % main_url+post_url)
-    return None
+    return (None, None)
     
   # This is the button to press
   params.setdefault("printDocuments", []).append("Print Selected Document(s)")
 
   # finally, lets check in the flight and make our success file
-  if DEBUG_SCH > 1:
-    checkinresult = ReadFile("Southwest Airlines - Retrieve-Print Boarding Pass.htm")
-  else:
-    checkinresult = PostUrl(main_url, final_url, params)
+  (checkinresult, checkin_url) = PostUrl(main_url, final_url, params)
 
   # write the returned page to a file for later inspection
   if checkinresult==None or len(checkinresult)==0:
     dlog("Error: no data returned from %s" % main_url+final_url)
-    return None
+    return (None, None)
 
-  # always save the returned file for later viewing
-  # TODO: don't clobber files when we have multiple flights to check in
-  WriteFile("boardingpass.htm", checkinresult)
+  soup = BeautifulSoup(checkinresult)
+  pos_boxes = soup.findAll('div', attrs = {'class': 'boardingGroupAndPositionBox'})
+  pos = []
+  for box in pos_boxes:
+    # look for what boarding letter and number we got in the file
+    box_data = box.renderContents()
+    group = re.search(r"boarding([ABC])\.gif", box_data)
+    num = 0
+    for m in re.finditer(r"boarding(\d)\.gif", box_data):
+      num *= 10
+      num += int(m.group(1))
+    pos.append("%s%d" % (group.group(1), num))
 
-  # look for what boarding letter and number we got in the file
-  group = re.search(r"boarding([ABC])\.gif", checkinresult)
-  num = 0
-  for m in re.finditer(r"boarding(\d)\.gif", checkinresult):
-    num *= 10
-    num += int(m.group(1))
+  # Add a base tag to the soup
+  tag = Tag(soup, 'base', [('href', urlparse.urljoin(checkin_url, "."))])
+  soup.head.insert(0, tag)
 
-  if group and num:
-    return "%s%d" % (group.group(1), num)
-  else:
-    return None
+  return (", ".join(pos), str(soup))
 
 def DateTimeToString(time):
   return time.strftime("%I:%M%p %b %d %y %Z");
@@ -441,11 +437,13 @@ def getFlightInfo(res, flights):
   message += "Passenger name: %s %s\r\n" % (res.first_name, res.last_name)
 
   for (i, flight) in enumerate(flights):
-    message += "Flight %d:\n  Departs: %s %s (%s)\n  Arrives: %s %s (%s)\n" \
-          % (i+1, flight.depart.airport, DateTimeToString(flight.depart.dt),
-             DateTimeToString(flight.depart.dt_utc),
-             flight.arrive.airport, DateTimeToString(flight.arrive.dt),
-             DateTimeToString(flight.arrive.dt_utc))
+    message += "Flight %d:\n" % (i+1, )
+    for leg in flight.legs:
+      message += "  Departs: %s %s (%s)\n  Arrives: %s %s (%s)\n" \
+          % (leg.depart.airport, DateTimeToString(leg.depart.dt),
+             DateTimeToString(leg.depart.dt_utc),
+             leg.arrive.airport, DateTimeToString(leg.arrive.dt),
+             DateTimeToString(leg.arrive.dt_utc))
   return message
 
 def displayFlightInfo(res, flights, do_send_email=False):
@@ -459,13 +457,13 @@ def TryCheckinFlight(res, flight, sch, attempt):
   print "Trying to checkin flight at %s" % DateTimeToString(datetime.now(utc))
   print "Attempt #%s" % attempt
   displayFlightInfo(res, [flight])
-  position = getBoardingPass(checkin_url, res)
+  (position, boarding_pass) = getBoardingPass(checkin_url, res)
   if position:
     message = ""
     message += "SUCCESS.  Checked in at position %s\r\n" % position
     message += getFlightInfo(res, [flight])
     print message
-    send_email("Flight checked in!", message)
+    send_email("Flight checked in!", message, boarding_pass)
   else:
     if attempt > (CHECKIN_WINDOW * 2) / RETRY_INTERVAL:
       print "FAILURE.  Too many failures, giving up."
@@ -474,7 +472,7 @@ def TryCheckinFlight(res, flight, sch, attempt):
       sch.enterabs(time_module.time() + RETRY_INTERVAL, 1,
                    TryCheckinFlight, (res, flight, sch, attempt + 1))
       
-def send_email(subject, message):
+def send_email(subject, message, boarding_pass = None):
   if not should_send_email:
     return
   
@@ -488,12 +486,16 @@ def send_email(subject, message):
       if smtp_auth:
         smtp.login(smtp_user, smtp_password)
       print "Sending mail to %s." % to
-      smtp.sendmail(email_from, to, """From: %s
-To: %s
-Subject: %s
-
-%s
-""" % (email_from, to, subject, message))
+      msg = MIMEMultipart("mixed")
+      msg['Subject'] = subject
+      msg['To'] = to
+      msg['From'] = email_from
+      msg.attach(MIMEText(message, 'plain'))
+      if boarding_pass:
+        msg_bp = MIMEText(boarding_pass, 'html')
+        msg_bp.add_header('content-disposition', 'attachment', filename='boarding_pass.html')
+        msg.attach(msg_bp)
+      smtp.sendmail(email_from, to, msg.as_string())
       
       print "EMail sent successfully."
       smtp.close()
@@ -543,7 +545,7 @@ def main():
     # Schedule all of the flights for checkin.  Schedule 3 minutes before our clock
     # says we are good to go
     for flight in res.flights:
-      flight_time = time_module.mktime(flight.depart.dt_utc.utctimetuple()) - time_module.timezone
+      flight_time = time_module.mktime(flight.legs[0].depart.dt_utc.utctimetuple()) - time_module.timezone
       if flight_time < time_module.time():
         print "Flight already left!"
       else:

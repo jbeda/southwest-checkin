@@ -7,7 +7,7 @@ passenger name, will do the following:
   going.
 * Wait until 24 hours the first flight
 * Drive the web site to check in all users for that reservation.
-* Optionally send email
+* Optionally send email with the boarding pass as an attachment
 * Repeat with any unchecked in flights
 
 You will still need to go back to the southwest site to print your boarding
