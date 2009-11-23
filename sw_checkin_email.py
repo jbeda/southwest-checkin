@@ -235,6 +235,18 @@ def PostUrl(host, path, dparams):
   wdata = resp.read()
 
   return (wdata, url_fetched)
+  
+def FindAllByTagClass(soup, tag, klass):
+  return soup.findAll(tag, 
+      attrs = { 'class': re.compile(re.escape(klass)) })
+
+def FindByTagClass(soup, tag, klass):
+  return soup.find(tag, 
+      attrs = { 'class': re.compile(re.escape(klass)) })
+      
+def FindNextSiblingByTagClass(soup, tag, klass):
+  return soup.findNextSibling(tag, 
+      attrs = { 'class': re.compile(re.escape(klass)) })
 
 def setInputBoxes(textnames, conf_number, first_name, last_name):
   if len(textnames) == 3:
@@ -279,16 +291,16 @@ class FlightInfoParser(object):
     soup = BeautifulSoup(data)
     self.flights = []
 
-    for td in soup.findAll("td", "flightInfoDetails"):
+    for td in FindAllByTagClass(soup, "td", "flightInfoDetails"):
       self.flights.append(self._parseFlightInfo(td))
 
   def _parseFlightInfo(self, soup):
     flight = Flight()
 
-    flight_date_str = soup.find("span", "travelDateTime").string
+    flight_date_str = FindByTagClass(soup, "span", "travelDateTime").string
     day = date(*time_module.strptime(flight_date_str, "%A, %B %d, %Y")[0:3])
 
-    td = soup.findNextSibling("td", "flightRouting")
+    td = FindNextSiblingByTagClass(soup, "td", "flightRouting")
     
     tr = td.find("tr")
     while tr:
@@ -309,12 +321,12 @@ class FlightInfoParser(object):
 
   def _parseFlightStop(self, day, soup):
     flight_stop = FlightStop()
-    stop_td = soup.find("td", attrs = {'class': re.compile("routingDetailsStops ?")})
+    stop_td = FindByTagClass(soup, "td", "routingDetailsStops")
     s = ''.join(stop_td.findAll(text=True))
     flight_stop.airport = re.findall("\(([A-Z]{3})\)", s)[0]
     flight_stop.tz = airport_timezone_map[flight_stop.airport]
     
-    detail_td = soup.find("td", attrs = {'class': re.compile("routingDetailsTimes ?")})
+    detail_td = FindByTagClass(soup, "td", "routingDetailsTimes")
     s = ''.join(detail_td.findAll(text=True)).strip()
     flight_time = time(*time_module.strptime(s, "%I:%M %p")[3:5])
     flight_stop.dt = flight_stop.tz.localize(
@@ -344,7 +356,7 @@ def getFlightTimes(the_url, res):
 
   # submit the request to pull up the reservations on this confirmation number
   (reservations, _) = PostUrl(main_url, post_url, params)
-
+  
   if reservations == None or len(reservations) == 0:
     print "Error: no data returned from ", main_url + post_url
     print "Params = ", dparams
@@ -409,7 +421,7 @@ def getBoardingPass(the_url, res):
     return (None, None)
 
   soup = BeautifulSoup(checkinresult)
-  pos_boxes = soup.findAll('div', attrs = {'class': 'boardingGroupAndPositionBox'})
+  pos_boxes = FindAllByTagClass(soup, 'div', 'boardingGroupAndPositionBox')
   pos = []
   for box in pos_boxes:
     # look for what boarding letter and number we got in the file
