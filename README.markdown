@@ -10,8 +10,17 @@ passenger name, will do the following:
 * Optionally send email with the boarding pass as an attachment
 * Repeat with any unchecked in flights
 
-You will still need to go back to the southwest site to print your boarding
-pass, but you should have a decent place in line.
+If you don't have the script email you, you will still need to go back to the
+southwest site to print your boarding pass, but you should have a decent place
+in line.
+
+If things look broken, please let me know and I'll try to fix it. Most of the
+time it is hard to fix the script without an active reservation though so
+letting me know in that 24 hour period with your confirmation code is probably
+the best way to keep the script working.
+
+You can let me know by sending email to joe.github@bedafamily.com. Hopefully
+that address won't be completely spammed up.
 
 ## Installation ##
 
@@ -26,5 +35,5 @@ install is to use easy_install.
     $ sw_checkin_email.py John Doe ABC123
 
 You will have to leave your terminal open while the script is waiting. You may
-want to look into using [nohup ordisown](http://www.basicallytech.com/blog/index.php?/archives/70-Shell-stuff-job-control-and-screen.html#bash_disown)
+want to look into using [nohup or disown](http://www.basicallytech.com/blog/index.php?/archives/70-Shell-stuff-job-control-and-screen.html#bash_disown)
 so that you can log out while the script runs.
