@@ -31,6 +31,7 @@ import time as time_module
 import datetime
 import sched
 import string
+import cookielib
 import urllib
 import urllib2
 import urlparse
@@ -77,11 +78,9 @@ else:  # gmail config
 
 # ========================================================================
 # fixed page locations and parameters
-# DO NOT change these parameters
-main_url = 'http://www.southwest.com'
-checkin_url = '/travel_center/retrieveCheckinDoc.html'
-retrieve_url = '/travel_center/retrieveItinerary.html'
-defaultboxes = ["recordLocator", "firstName", "lastName"]
+base_url = 'https://www.southwest.com'
+checkin_url = urlparse.urljoin(base_url, '/flight/retrieveCheckinDoc.html')
+retrieve_url = urlparse.urljoin(base_url, '/flight/lookup-air-reservation.html')
 
 # ========================================================================
 
@@ -169,6 +168,11 @@ airport_timezone_map = {
 
 # ========================================================================
 
+class Error(Exception):
+  pass
+
+# ========================================================================
+
 verbose = False
 def dlog(str):
   if verbose:
@@ -194,47 +198,46 @@ class Reservation(object):
 
 # =========== function definitions =======================================
 
+# build our cookie based opener
+opener = urllib2.build_opener(urllib2.HTTPCookieProcessor())
+
 # this function reads a URL and returns the text of the page
-def ReadUrl(host, path):
-  url = urlparse.urljoin(host, path)
+def ReadUrl(url):
+  headers = {}
+  headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+  headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.5; en-US; rv:1.9.2.8) Gecko/20100722 Firefox/3.6.8 GTB7.1'
+
   dlog("GET to %s" % url)
-  wdata = ""
+  dlog("  headers: %s" % headers)
+
 
   try:
-    req = urllib2.Request(url=url)
-    resp = urllib2.urlopen(req)
-  except:
-    print "Error: Cannot connect in GET mode to ", url
-    sys.exit(1)
+    req = urllib2.Request(url=url, headers=headers)
+    resp = opener.open(req)
+  except Exception, e:
+    raise Error("Cannot GET: %s" % url, e)
 
-  wdata = resp.read()
-
-  return wdata
+  return (resp.read(), resp.geturl())
 
 # this function sends a post just like you clicked on a submit button
-def PostUrl(host, path, dparams):
-  wdata = ""
-  url = urlparse.urljoin(host, path)
-  params = urllib.urlencode(dparams, True)
-  headers = {"Content-type": "application/x-www-form-urlencoded", "Accept": "text/plain"}
+def PostUrl(url, params):
+  str_params = urllib.urlencode(params, True)
+  headers = {}
+  headers['Content-Type'] = 'application/x-www-form-urlencoded'
+  headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+  headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.5; en-US; rv:1.9.2.8) Gecko/20100722 Firefox/3.6.8 GTB7.1'
 
   dlog("POST to %s" % url)
-  dlog("  data: %s" % params)
+  dlog("  data: %s" % str_params)
   dlog("  headers: %s" % headers)
 
   try:
-    req = urllib2.Request(url=url, data=params, headers=headers)
-    resp = urllib2.urlopen(req)
-  except:
-    print "Error: Cannot connect in POST mode to ", url
-    print "Params = ", dparams
-    print sys.exc_info()[1]
-    sys.exit(1)
+    req = urllib2.Request(url=url, data=str_params, headers=headers)
+    resp = opener.open(req)
+  except Exception, e:
+    raise Error('Cannot POST: %s' % url, e)
 
-  url_fetched = resp.geturl()
-  wdata = resp.read()
-
-  return (wdata, url_fetched)
+  return (resp.read(), resp.geturl())
   
 def FindAllByTagClass(soup, tag, klass):
   return soup.findAll(tag, 
@@ -248,24 +251,29 @@ def FindNextSiblingByTagClass(soup, tag, klass):
   return soup.findNextSibling(tag, 
       attrs = { 'class': re.compile(re.escape(klass)) })
 
-def setInputBoxes(textnames, conf_number, first_name, last_name):
-  if len(textnames) == 3:
-    boxes = textnames
-  else:
-    boxes = defaultboxes
-
-  params = {}
-  params[boxes[0]] = conf_number
-  params[boxes[1]] = first_name
-  params[boxes[2]] = last_name
-
-  return params
-
 class HtmlFormParser(object):
-  def __init__(self, data, id):
-    self.hiddentags = {}
+  class Input(object):
+    def __init__(self, tag):
+      self.type = tag.get("type", None)
+      self.name = tag.get("name", '')
+      self.value = tag.get("value", '')
+      # default checked to true for hidden and text inputs
+      default_checked = not(self.type == 'checkbox' or self.type == 'radio' 
+          or self.type == 'submit')
+      self.checked = tag.get("checked", default_checked)
+      
+    def __str__(self):
+      return repr(self.__dict__)
+      
+    def addToParams(self, params):
+      if self.checked:
+        params.append((self.name, self.value))
+      
+  def __init__(self, data, page_url, id):
+    self.inputs = []
+    # {type->{name->[inputs]}}
+    self.input_types = {}
     self.formaction = ""
-    self.textnames = []
 
     soup = BeautifulSoup(data)
     form = soup.find("form", id=id)
@@ -273,24 +281,61 @@ class HtmlFormParser(object):
       return
 
     self.formaction = form.get("action", None)
+    self.submit_url = urlparse.urljoin(page_url, self.formaction)
 
     # find all inputs
     for i in form.findAll("input"):
-      self.addInput(i)
-
-  def addInput(self, input):
-    type = input.get("type", None)
-    name = input.get("name", None)
-    if type == "hidden" or type == "checkbox" or type == "radio" :
-      self.hiddentags.setdefault(name, []).append(input.get("value", None))
-    elif type == "text":
-      self.textnames.append(name);
+      input = HtmlFormParser.Input(i)
+      if input.name:
+        self.inputs.append(input)
+        (self.input_types.setdefault(input.type, {}).setdefault(input.name, [])
+            .append(input))
+          
+  def submit(self):
+    """Submit the form and return the (contents, url)."""
+    return PostUrl(self.submit_url, self.getParams())
+          
+  def validateSubmitButtons(self):
+    """Ensures that one and only one submit is 'checked'."""
+    numChecked = 0
+    for i in self.inputs:
+      if i.type == 'submit' and i.checked:
+        numChecked += 1
+    if numChecked > 1:
+      raise Error('Too many submit buttons checked on form!')
+    
+    # None checked, default to the first one
+    if numChecked == 0:
+      for i in self.inputs:
+        if i.type == 'submit':
+          i.checked = True
+          break
+  
+  def setSubmit(self, name, value=None):
+    for i in self.inputs:
+      if i.type == 'submit' and i.name == name:
+        if value == None or i.value == value:
+          i.checked = True
+          break
+  
+  def getParams(self):
+    self.validateSubmitButtons()
+    params = []
+    for i in self.inputs:
+      i.addToParams(params)
+    return params
+    
+  def setTextField(self, name, value):
+    self.input_types['text'][name][0].value = value
+    
+  def setAllCheckboxes(self, name):
+    for cb in self.input_types['checkbox'][name]:
+      cb.checked = True
 
 class FlightInfoParser(object):
   def __init__(self, data):
     soup = BeautifulSoup(data)
     self.flights = []
-
     for td in FindAllByTagClass(soup, "td", "flightInfoDetails"):
       self.flights.append(self._parseFlightInfo(td))
 
@@ -336,105 +381,70 @@ class FlightInfoParser(object):
     
 
 # this routine extracts the departure date and time
-def getFlightTimes(the_url, res):
-  swdata = ReadUrl(main_url, the_url)
+def getFlightTimes(res):
+  (swdata, form_url) = ReadUrl(retrieve_url)
 
-  if swdata == None or len(swdata) == 0:
-    print "Error: no data returned from ", main_url+the_url
-    sys.exit(1)
-
-  form_data = HtmlFormParser(swdata, "itineraryLookup")
-
-  # get the post action name from the parser
-  post_url = form_data.formaction
-  if post_url == None or post_url == "":
-    print "Error: no POST action found in ", main_url + the_url
-    sys.exit(1)
+  form = HtmlFormParser(swdata, form_url, "pnrFriendlyLookup_check_form")
 
   # load the parameters into the text boxes
-  params = setInputBoxes(form_data.textnames, res.code, res.first_name, res.last_name)
+  form.setTextField('confirmationNumberFirstName', res.first_name)
+  form.setTextField('confirmationNumberLastName', res.last_name)
+  form.setTextField('confirmationNumber', res.code)
 
   # submit the request to pull up the reservations on this confirmation number
-  (reservations, _) = PostUrl(main_url, post_url, params)
-  
-  if reservations == None or len(reservations) == 0:
-    print "Error: no data returned from ", main_url + post_url
-    print "Params = ", dparams
-    sys.exit(1)
+  (reservations, _) = form.submit()
 
   flights = FlightInfoParser(reservations)
   res.flights = flights.flights
 
   return res.flights
 
-def getBoardingPass(the_url, res):
+def getBoardingPass(res):
   # read the southwest checkin web site
-  swdata = ReadUrl(main_url, the_url)
-
-  if swdata==None or len(swdata)==0:
-    print "Error: no data returned from ", main_url+the_url
-    sys.exit(1)
+  (swdata, form_url) = ReadUrl(checkin_url)
 
   # parse the data
-  form_data = HtmlFormParser(swdata, "itineraryLookup")
-
-  # get the post action name from the parser
-  post_url = form_data.formaction
-  if post_url==None or post_url=="":
-    print "Error: no POST action found in ", main_url+the_url
-    sys.exit(1)
+  form = HtmlFormParser(swdata, form_url, "itineraryLookup")
 
   # load the parameters into the text boxes by name
   # where the names are obtained from the parser
-  params = setInputBoxes(form_data.textnames, 
-                         res.code, res.first_name, 
-                         res.last_name)
+  form.setTextField('confirmationNumber', res.code)
+  form.setTextField('firstName', res.first_name)
+  form.setTextField('lastName', res.last_name)
 
   # submit the request to pull up the reservations
-  (reservations, _) = PostUrl(main_url, post_url, params)
-
-  if reservations==None or len(reservations)==0:
-    print "Error: no data returned from ", main_url+post_url
-    print "Params = ", params
-    sys.exit(1)
-
-  # parse the returned reservations page
-  form_data = HtmlFormParser(reservations, "checkinOptions")
-
-  # Extract the name of the post function to check into the flight
-  final_url = form_data.formaction
-
-  params = form_data.hiddentags
-  if len(params) < 2:
-    dlog("Error: Fewer than the expect 2 special fields returned from %s" % main_url+post_url)
-    return (None, None)
+  (reservations, form_url) = form.submit()
     
+  # parse the returned reservations page
+  form = HtmlFormParser(reservations, form_url, "checkinOptions")
+  
+  # Need to check all of the passengers
+  for (name, inputs) in form.input_types['checkbox'].items():
+    if name.startswith('checkinPassengers'):
+      inputs[0].checked = True
+  
   # This is the button to press
-  params.setdefault("printDocuments", []).append("Print Selected Document(s)")
+  form.setSubmit('printDocuments')
 
   # finally, lets check in the flight and make our success file
-  (checkinresult, checkin_url) = PostUrl(main_url, final_url, params)
-
-  # write the returned page to a file for later inspection
-  if checkinresult==None or len(checkinresult)==0:
-    dlog("Error: no data returned from %s" % main_url+final_url)
-    return (None, None)
+  (checkinresult, form_url) = form.submit()
 
   soup = BeautifulSoup(checkinresult)
-  pos_boxes = FindAllByTagClass(soup, 'div', 'boardingGroupAndPositionBox')
+  pos_boxes = FindAllByTagClass(soup, 'div', 'boardingPosition')
   pos = []
   for box in pos_boxes:
-    # look for what boarding letter and number we got in the file
-    box_data = box.renderContents()
-    group = re.search(r"boarding([ABC])\.gif", box_data)
+    group = None
+    group_img = FindByTagClass(box, 'img', 'group')
+    if group_img:
+      group = group_img['alt']
     num = 0
-    for m in re.finditer(r"boarding(\d)\.gif", box_data):
+    for num_img in FindAllByTagClass(box, 'img', 'position'):
       num *= 10
-      num += int(m.group(1))
-    pos.append("%s%d" % (group.group(1), num))
+      num += int(num_img['alt'])
+    pos.append("%s%d" % (group, num))
 
   # Add a base tag to the soup
-  tag = Tag(soup, 'base', [('href', urlparse.urljoin(checkin_url, "."))])
+  tag = Tag(soup, 'base', [('href', urlparse.urljoin(form_url, "."))])
   soup.head.insert(0, tag)
 
   return (", ".join(pos), str(soup))
@@ -469,7 +479,7 @@ def TryCheckinFlight(res, flight, sch, attempt):
   print "Trying to checkin flight at %s" % DateTimeToString(datetime.now(utc))
   print "Attempt #%s" % attempt
   displayFlightInfo(res, [flight])
-  (position, boarding_pass) = getBoardingPass(checkin_url, res)
+  (position, boarding_pass) = getBoardingPass(res)
   if position:
     message = ""
     message += "SUCCESS.  Checked in at position %s\r\n" % position
@@ -549,7 +559,7 @@ def main():
 
   # get the departure times in a tuple
   for res in reservations:
-    getFlightTimes(retrieve_url, res)
+    getFlightTimes(res)
 
     # print some information to the terminal for confirmation purposes
     displayFlightInfo(res, res.flights, True)
