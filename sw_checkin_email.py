@@ -254,7 +254,7 @@ def FindNextSiblingByTagClass(soup, tag, klass):
 class HtmlFormParser(object):
   class Input(object):
     def __init__(self, tag):
-      self.type = tag.get("type", None)
+      self.type = tag.get("type", 'text')
       self.name = tag.get("name", '')
       self.value = tag.get("value", '')
       # default checked to true for hidden and text inputs
@@ -271,8 +271,6 @@ class HtmlFormParser(object):
       
   def __init__(self, data, page_url, id):
     self.inputs = []
-    # {type->{name->[inputs]}}
-    self.input_types = {}
     self.formaction = ""
 
     soup = BeautifulSoup(data)
@@ -288,8 +286,6 @@ class HtmlFormParser(object):
       input = HtmlFormParser.Input(i)
       if input.name:
         self.inputs.append(input)
-        (self.input_types.setdefault(input.type, {}).setdefault(input.name, [])
-            .append(input))
           
   def submit(self):
     """Submit the form and return the (contents, url)."""
@@ -326,11 +322,16 @@ class HtmlFormParser(object):
     return params
     
   def setTextField(self, name, value):
-    self.input_types['text'][name][0].value = value
+    for i in self.inputs:
+      if i.type == 'text' and i.name == name:
+        i.value = value
+        break
     
   def setAllCheckboxes(self, name):
-    for cb in self.input_types['checkbox'][name]:
-      cb.checked = True
+    for i in self.inputs:
+      if i.type == 'checkbox' and i.name == name:
+        cb.checked = True
+        break
 
 class FlightInfoParser(object):
   def __init__(self, data):
@@ -419,9 +420,9 @@ def getBoardingPass(res):
   form = HtmlFormParser(reservations, form_url, "checkinOptions")
   
   # Need to check all of the passengers
-  for (name, inputs) in form.input_types['checkbox'].items():
-    if name.startswith('checkinPassengers'):
-      inputs[0].checked = True
+  for i in form.inputs:
+    if i.type == 'checkbox' and i.name.startswith('checkinPassengers'):
+      i.checked = True
   
   # This is the button to press
   form.setSubmit('printDocuments')
