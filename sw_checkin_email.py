@@ -64,16 +64,16 @@ email_to = None
 
 # SMTP server config
 if False:  # local config
-  smtp_server = "localhost"
+  smtp_server = 'localhost'
   smtp_auth = False
   smtp_user = email_from
-  smtp_password = ""  # if blank, we will prompt first and send test message       
+  smtp_password = ''  # if blank, we will prompt first and send test message       
   smtp_use_tls = False
 else:  # gmail config
-  smtp_server = "smtp.gmail.com"
+  smtp_server = 'smtp.gmail.com'
   smtp_auth = True
   smtp_user = email_from
-  smtp_password = ""  # if blank, we will prompt first and send test message
+  smtp_password = ''  # if blank, we will prompt first and send test message
   smtp_use_tls = True
 
 # ========================================================================
@@ -176,7 +176,7 @@ class Error(Exception):
 verbose = False
 def dlog(str):
   if verbose:
-    print "DEBUG: %s" % str
+    print 'DEBUG: %s' % str
 
 # ========================================================================
 
@@ -207,15 +207,15 @@ def ReadUrl(url):
   headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
   headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.5; en-US; rv:1.9.2.8) Gecko/20100722 Firefox/3.6.8 GTB7.1'
 
-  dlog("GET to %s" % url)
-  dlog("  headers: %s" % headers)
+  dlog('GET to %s' % url)
+  dlog('  headers: %s' % headers)
 
 
   try:
     req = urllib2.Request(url=url, headers=headers)
     resp = opener.open(req)
   except Exception, e:
-    raise Error("Cannot GET: %s" % url, e)
+    raise Error('Cannot GET: %s' % url, e)
 
   return (resp.read(), resp.geturl())
 
@@ -227,9 +227,9 @@ def PostUrl(url, params):
   headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
   headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.5; en-US; rv:1.9.2.8) Gecko/20100722 Firefox/3.6.8 GTB7.1'
 
-  dlog("POST to %s" % url)
-  dlog("  data: %s" % str_params)
-  dlog("  headers: %s" % headers)
+  dlog('POST to %s' % url)
+  dlog('  data: %s' % str_params)
+  dlog('  headers: %s' % headers)
 
   try:
     req = urllib2.Request(url=url, data=str_params, headers=headers)
@@ -254,13 +254,13 @@ def FindNextSiblingByTagClass(soup, tag, klass):
 class HtmlFormParser(object):
   class Input(object):
     def __init__(self, tag):
-      self.type = tag.get("type", 'text')
-      self.name = tag.get("name", '')
-      self.value = tag.get("value", '')
+      self.type = tag.get('type', 'text')
+      self.name = tag.get('name', '')
+      self.value = tag.get('value', '')
       # default checked to true for hidden and text inputs
       default_checked = not(self.type == 'checkbox' or self.type == 'radio' 
           or self.type == 'submit')
-      self.checked = tag.get("checked", default_checked)
+      self.checked = tag.get('checked', default_checked)
       
     def __str__(self):
       return repr(self.__dict__)
@@ -271,18 +271,18 @@ class HtmlFormParser(object):
       
   def __init__(self, data, page_url, id):
     self.inputs = []
-    self.formaction = ""
+    self.formaction = ''
 
     soup = BeautifulSoup(data)
-    form = soup.find("form", id=id)
+    form = soup.find('form', id=id)
     if not form:
       return
 
-    self.formaction = form.get("action", None)
+    self.formaction = form.get('action', None)
     self.submit_url = urlparse.urljoin(page_url, self.formaction)
 
     # find all inputs
-    for i in form.findAll("input"):
+    for i in form.findAll('input'):
       input = HtmlFormParser.Input(i)
       if input.name:
         self.inputs.append(input)
@@ -337,23 +337,23 @@ class FlightInfoParser(object):
   def __init__(self, data):
     soup = BeautifulSoup(data)
     self.flights = []
-    for td in FindAllByTagClass(soup, "td", "flightInfoDetails"):
+    for td in FindAllByTagClass(soup, 'td', 'flightInfoDetails'):
       self.flights.append(self._parseFlightInfo(td))
 
   def _parseFlightInfo(self, soup):
     flight = Flight()
 
-    flight_date_str = FindByTagClass(soup, "span", "travelDateTime").string
-    day = date(*time_module.strptime(flight_date_str, "%A, %B %d, %Y")[0:3])
+    flight_date_str = FindByTagClass(soup, 'span', 'travelDateTime').string
+    day = date(*time_module.strptime(flight_date_str, '%A, %B %d, %Y')[0:3])
 
-    td = FindNextSiblingByTagClass(soup, "td", "flightRouting")
+    td = FindNextSiblingByTagClass(soup, 'td', 'flightRouting')
     
-    tr = td.find("tr")
+    tr = td.find('tr')
     while tr:
       flight_leg = FlightLeg()
       flight.legs.append(flight_leg)
       flight_leg.depart = self._parseFlightStop(day, tr)
-      tr = tr.findNextSibling("tr")
+      tr = tr.findNextSibling('tr')
       flight_leg.arrive = self._parseFlightStop(day, tr)
 
       if flight_leg.arrive.dt_utc < flight_leg.depart.dt_utc:
@@ -361,20 +361,20 @@ class FlightInfoParser(object):
           flight_leg.arrive.dt.replace(day = flight_leg.arrive.dt.day+1))
         flight_leg.arrive.dt_utc = flight_leg.arrive.dt.astimezone(utc)
 
-      tr = tr.findNextSibling("tr")
+      tr = tr.findNextSibling('tr')
  
     return flight
 
   def _parseFlightStop(self, day, soup):
     flight_stop = FlightStop()
-    stop_td = FindByTagClass(soup, "td", "routingDetailsStops")
+    stop_td = FindByTagClass(soup, 'td', 'routingDetailsStops')
     s = ''.join(stop_td.findAll(text=True))
-    flight_stop.airport = re.findall("\(([A-Z]{3})\)", s)[0]
+    flight_stop.airport = re.findall('\(([A-Z]{3})\)', s)[0]
     flight_stop.tz = airport_timezone_map[flight_stop.airport]
     
-    detail_td = FindByTagClass(soup, "td", "routingDetailsTimes")
+    detail_td = FindByTagClass(soup, 'td', 'routingDetailsTimes')
     s = ''.join(detail_td.findAll(text=True)).strip()
-    flight_time = time(*time_module.strptime(s, "%I:%M %p")[3:5])
+    flight_time = time(*time_module.strptime(s, '%I:%M %p')[3:5])
     flight_stop.dt = flight_stop.tz.localize(
       datetime.combine(day, flight_time), is_dst=None)
     flight_stop.dt_utc = flight_stop.dt.astimezone(utc)
@@ -385,7 +385,7 @@ class FlightInfoParser(object):
 def getFlightTimes(res):
   (swdata, form_url) = ReadUrl(retrieve_url)
 
-  form = HtmlFormParser(swdata, form_url, "pnrFriendlyLookup_check_form")
+  form = HtmlFormParser(swdata, form_url, 'pnrFriendlyLookup_check_form')
 
   # load the parameters into the text boxes
   form.setTextField('confirmationNumberFirstName', res.first_name)
@@ -405,7 +405,7 @@ def getBoardingPass(res):
   (swdata, form_url) = ReadUrl(checkin_url)
 
   # parse the data
-  form = HtmlFormParser(swdata, form_url, "itineraryLookup")
+  form = HtmlFormParser(swdata, form_url, 'itineraryLookup')
 
   # load the parameters into the text boxes by name
   # where the names are obtained from the parser
@@ -417,7 +417,7 @@ def getBoardingPass(res):
   (reservations, form_url) = form.submit()
     
   # parse the returned reservations page
-  form = HtmlFormParser(reservations, form_url, "checkinOptions")
+  form = HtmlFormParser(reservations, form_url, 'checkinOptions')
   
   # Need to check all of the passengers
   for i in form.inputs:
@@ -442,27 +442,27 @@ def getBoardingPass(res):
     for num_img in FindAllByTagClass(box, 'img', 'position'):
       num *= 10
       num += int(num_img['alt'])
-    pos.append("%s%d" % (group, num))
+    pos.append('%s%d' % (group, num))
 
   # Add a base tag to the soup
-  tag = Tag(soup, 'base', [('href', urlparse.urljoin(form_url, "."))])
+  tag = Tag(soup, 'base', [('href', urlparse.urljoin(form_url, '.'))])
   soup.head.insert(0, tag)
 
-  return (", ".join(pos), str(soup))
+  return (', '.join(pos), str(soup))
 
 def DateTimeToString(time):
-  return time.strftime("%I:%M%p %b %d %y %Z");
+  return time.strftime('%I:%M%p %b %d %y %Z');
 
 # print some information to the terminal for confirmation purposes
 def getFlightInfo(res, flights):
-  message = ""
-  message += "Confirmation number: %s\r\n" % res.code
-  message += "Passenger name: %s %s\r\n" % (res.first_name, res.last_name)
+  message = ''
+  message += 'Confirmation number: %s\r\n' % res.code
+  message += 'Passenger name: %s %s\r\n' % (res.first_name, res.last_name)
 
   for (i, flight) in enumerate(flights):
-    message += "Flight %d:\n" % (i+1, )
+    message += 'Flight %d:\n' % (i+1, )
     for leg in flight.legs:
-      message += "  Departs: %s %s (%s)\n  Arrives: %s %s (%s)\n" \
+      message += '  Departs: %s %s (%s)\n  Arrives: %s %s (%s)\n' \
           % (leg.depart.airport, DateTimeToString(leg.depart.dt),
              DateTimeToString(leg.depart.dt_utc),
              leg.arrive.airport, DateTimeToString(leg.arrive.dt),
@@ -473,25 +473,25 @@ def displayFlightInfo(res, flights, do_send_email=False):
   message = getFlightInfo(res, flights)
   print message
   if do_send_email:
-    send_email("Waiting for SW flight", message);
+    send_email('Waiting for SW flight', message);
 
 def TryCheckinFlight(res, flight, sch, attempt):
-  print "-="*30
-  print "Trying to checkin flight at %s" % DateTimeToString(datetime.now(utc))
-  print "Attempt #%s" % attempt
+  print '-='*30
+  print 'Trying to checkin flight at %s' % DateTimeToString(datetime.now(utc))
+  print 'Attempt #%s' % attempt
   displayFlightInfo(res, [flight])
   (position, boarding_pass) = getBoardingPass(res)
   if position:
-    message = ""
-    message += "SUCCESS.  Checked in at position %s\r\n" % position
+    message = ''
+    message += 'SUCCESS.  Checked in at position %s\r\n' % position
     message += getFlightInfo(res, [flight])
     print message
-    send_email("Flight checked in!", message, boarding_pass)
+    send_email('Flight checked in!', message, boarding_pass)
   else:
     if attempt > (CHECKIN_WINDOW * 2) / RETRY_INTERVAL:
-      print "FAILURE.  Too many failures, giving up."
+      print 'FAILURE.  Too many failures, giving up.'
     else:
-      print "FAILURE.  Scheduling another try in %d seconds" % RETRY_INTERVAL
+      print 'FAILURE.  Scheduling another try in %d seconds' % RETRY_INTERVAL
       sch.enterabs(time_module.time() + RETRY_INTERVAL, 1,
                    TryCheckinFlight, (res, flight, sch, attempt + 1))
       
@@ -499,7 +499,7 @@ def send_email(subject, message, boarding_pass = None):
   if not should_send_email:
     return
   
-  for to in [string.strip(s) for s in string.split(email_to, ",")]:
+  for to in [string.strip(s) for s in string.split(email_to, ',')]:
     try:
       smtp = smtplib.SMTP(smtp_server, 587)
       smtp.ehlo()
@@ -508,8 +508,8 @@ def send_email(subject, message, boarding_pass = None):
       smtp.ehlo()
       if smtp_auth:
         smtp.login(smtp_user, smtp_password)
-      print "Sending mail to %s." % to
-      msg = MIMEMultipart("mixed")
+      print 'Sending mail to %s.' % to
+      msg = MIMEMultipart('mixed')
       msg['Subject'] = subject
       msg['To'] = to
       msg['From'] = email_from
@@ -520,17 +520,17 @@ def send_email(subject, message, boarding_pass = None):
         msg.attach(msg_bp)
       smtp.sendmail(email_from, to, msg.as_string())
       
-      print "EMail sent successfully."
+      print 'EMail sent successfully.'
       smtp.close()
     except:
-      print "Error sending email!"
+      print 'Error sending email!'
       print sys.exc_info()[1]
 
 # main program
 def main():
   if (len(sys.argv) - 1) % 3 != 0 or len(sys.argv) < 4:
-    print "Please provide name and confirmation code:"
-    print "   %s (<firstname> <lastname> <confirmation code>)+" % sys.argv[0]
+    print 'Please provide name and confirmation code:'
+    print '   %s (<firstname> <lastname> <confirmation code>)+' % sys.argv[0]
     sys.exit(1)
 
   reservations = []
@@ -545,14 +545,14 @@ def main():
   
   if should_send_email:
     if not email_from:
-      email_from = raw_input("Email from: ");
+      email_from = raw_input('Email from: ');
     if email_from:
       if not email_to:
-        email_to = raw_input("Email to: ");
+        email_to = raw_input('Email to: ');
       if not smtp_user:
         smtp_user = email_from
       if not smtp_password and smtp_auth:
-        smtp_password = getpass.getpass("Email Password: ");
+        smtp_password = getpass.getpass('Email Password: ');
     else:
       should_send_email = False
 
@@ -570,14 +570,14 @@ def main():
     for flight in res.flights:
       flight_time = time_module.mktime(flight.legs[0].depart.dt_utc.utctimetuple()) - time_module.timezone
       if flight_time < time_module.time():
-        print "Flight already left!"
+        print 'Flight already left!'
       else:
         sched_time = flight_time - CHECKIN_WINDOW - 24*60*60
-        print "Update Sched: %s" % DateTimeToString(datetime.fromtimestamp(sched_time, utc))
+        print 'Update Sched: %s' % DateTimeToString(datetime.fromtimestamp(sched_time, utc))
         sch.enterabs(sched_time, 1, TryCheckinFlight, (res, flight, sch, 1))
     
-  print "Current time: %s" % DateTimeToString(datetime.now(utc))
-  print "Flights scheduled.  Waiting..."
+  print 'Current time: %s' % DateTimeToString(datetime.now(utc))
+  print 'Flights scheduled.  Waiting...'
   sch.run()
 
 if __name__=='__main__':
