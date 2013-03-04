@@ -1,5 +1,11 @@
 # Southwest Checkin Script #
 
+----
+
+**Warning:** This script is old and out of date. Since it was written southwest has updated their site.  If you get it working again I'm happy to take patches or point any users to an updated version.
+
+----
+
 This is a command line python script that will, given a confirmation code and
 passenger name, will do the following:
 
